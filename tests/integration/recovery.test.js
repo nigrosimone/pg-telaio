@@ -6,7 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const { createSql } = require("../../src/index");
-const { URL, openPool } = require("./helpers");
+const { URL, openPool, ensureItems } = require("./helpers");
 
 test("recovery", async (t) => {
     // the kill test terminates the pool's own backends too; the error listener
@@ -17,6 +17,7 @@ test("recovery", async (t) => {
         t.skip("database unreachable");
         return;
     }
+    await ensureItems(pool);
 
     try {
         await t.test("a schema change retries the prepared statement under a fresh name", async () => {

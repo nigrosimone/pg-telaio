@@ -6,7 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const { createSql } = require("../../src/index");
-const { URL, openPool } = require("./helpers");
+const { URL, openPool, ensureItems } = require("./helpers");
 
 test("pipeline", async (t) => {
     const pool = await openPool();
@@ -15,6 +15,7 @@ test("pipeline", async (t) => {
         t.skip("database unreachable");
         return;
     }
+    await ensureItems(pool);
 
     try {
         await t.test("a select returns rows and auto opens 3 connections", async () => {

@@ -31,4 +31,29 @@ async function openPool() {
     }
 }
 
-module.exports = { URL, openPool };
+/**
+ * The items table the suites read. Locally the bench seed provides a big one; a bare database,
+ * which is what CI's service is, gets a small one with the same shape.
+ *
+ * @param {any} pool
+ * @returns {Promise<void>}
+ */
+async function ensureItems(pool) {
+    await pool.query(
+        "create table if not exists items (" +
+            "id integer primary key, name text not null, category text not null, " +
+            "price integer not null, quantity integer not null, active boolean not null, " +
+            "tags jsonb not null, rating_score integer not null, rating_count integer not null)"
+    );
+    const { rows } = await pool.query("select count(*)::int as n from items");
+    if (rows[0].n === 0) {
+        await pool.query(
+            "insert into items select i, 'Item ' || i, " +
+                "(array['home', 'books', 'office', 'toys', 'sports'])[1 + i % 5], " +
+                "i % 500, i % 1000, i % 2 = 0, '[\"bench\"]'::jsonb, i % 5, i % 100 " +
+                "from generate_series(1, 100) i"
+        );
+    }
+}
+
+module.exports = { URL, openPool, ensureItems };
