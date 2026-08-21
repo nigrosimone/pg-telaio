@@ -182,6 +182,83 @@ test("a dead slot is replaced, not counted as capacity twice: a later burst stop
     await dispatcher.close();
 });
 
+test("a slot at the cap that has gone silent counts as stalled, not merely busy", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const { Client } = fakeClient({ query: () => gate });
+    const overflowed = [];
+    const dispatcher = createDispatcher(
+        Client,
+        {},
+        {
+            connections: 1,
+            maxPipeline: 2,
+            stallMillis: 10,
+            overflow: async (cfg) => {
+                overflowed.push(cfg);
+                return { route: "overflow", cfg };
+            }
+        }
+    );
+    // fill the cap with queries that never answer
+    const held = [dispatcher.query({ text: "one" }), dispatcher.query({ text: "two" })];
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // at the cap AND silent: the query rides the pool instead of queueing behind a reply that
+    // is not coming. Testing the cap first used to hide this case entirely.
+    const during = await dispatcher.query({ text: "three" });
+    assert.strictEqual(during.route, "overflow");
+    assert.strictEqual(overflowed.length, 1);
+
+    release({ route: "pipeline" });
+    await Promise.all(held);
+    await dispatcher.close();
+});
+
+test("a stall verdict is confirmed a turn later, so a paused event loop costs no overflow", async () => {
+    let answer;
+    let queries = 0;
+    const { Client } = fakeClient({
+        query: (cfg) => {
+            queries++;
+            // only the first one is held; the rest answer at once
+            if (queries > 1) {
+                return Promise.resolve({ route: "pipeline", cfg });
+            }
+            return new Promise((resolve) => {
+                answer = () => resolve({ route: "pipeline", cfg });
+            });
+        }
+    });
+    const overflowed = [];
+    const dispatcher = createDispatcher(
+        Client,
+        {},
+        {
+            connections: 1,
+            maxPipeline: 100,
+            stallMillis: 10,
+            overflow: async (cfg) => {
+                overflowed.push(cfg);
+                return { route: "overflow", cfg };
+            }
+        }
+    );
+    const held = dispatcher.query({ text: "held" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // the reply is already on its way, the way it is after a garbage-collection pause: it lands
+    // in the turn the dispatcher waits before believing its own verdict
+    setImmediate(() => answer());
+    const after = await dispatcher.query({ text: "after" });
+    assert.strictEqual(after.route, "pipeline");
+    assert.deepStrictEqual(overflowed, []);
+    await held;
+    await dispatcher.close();
+});
+
 test("a stall recruits an unused slot before it takes the overflow", async () => {
     let release;
     const gate = new Promise((resolve) => {

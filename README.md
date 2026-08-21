@@ -235,6 +235,11 @@ The tag watches for it. A connection with queries outstanding that has not answe
 connection is in that state the queries go through `pool.query()`. So a slow query costs the
 replies already queued behind it, and nothing more. `stallMillis: false` turns the guard off.
 
+The clock is this process's, so an event-loop pause silences every connection at once: the verdict
+is taken a turn later, when the replies a pause delayed have landed and a connection that is
+really blocked still has not moved. And since the queries go to the pool while that lasts, the
+pool needs room: with `max: 1` they would queue on one connection instead of the blocked one.
+
 When you know a query is slow, send it past the pipelined connections from the start:
 
 ```js

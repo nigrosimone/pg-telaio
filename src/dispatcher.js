@@ -131,11 +131,16 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
                 spawn(i);
             }
             const slot = slots[i];
-            if (slot.inflight >= maxPipeline) {
+            // the stall test comes first: a slot at the cap is skipped either way, but if it is
+            // also silent it is stalled, not merely busy. Testing the cap first meant the guard
+            // stopped having an opinion past `connections * maxPipeline` in flight, which is
+            // exactly where a blocked connection costs the most.
+            const stale = stallMillis > 0 && slot.inflight > 0 && now - slot.progress > stallMillis;
+            if (stale) {
+                stalled = true;
                 continue;
             }
-            if (stallMillis > 0 && slot.inflight > 0 && now - slot.progress > stallMillis) {
-                stalled = true;
+            if (slot.inflight >= maxPipeline) {
                 continue;
             }
             if (best === null || slot.inflight < best.inflight) {
@@ -161,10 +166,23 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
                 throw new Error("the dispatcher is closed: sql.close() was called");
             }
             let { slot, stalled } = pick();
+            let confirmed = false;
             while (slot === null) {
                 // a stall is not a queue that drains: what everyone would be waiting on is the
-                // slow query itself, so take the pool instead of a place in that line
+                // slow query itself, so take the pool instead of a place in that line. The clock
+                // is this process's, though, and an event-loop pause silences every connection at
+                // once, so the verdict is confirmed one turn later: replies delayed by a pause
+                // land in that turn, a connection that is really blocked does not move.
                 if (stalled && overflow) {
+                    if (!confirmed) {
+                        confirmed = true;
+                        await new Promise((resolve) => setImmediate(resolve));
+                        if (closed) {
+                            throw new Error("the dispatcher is closed: sql.close() was called");
+                        }
+                        ({ slot, stalled } = pick());
+                        continue;
+                    }
                     return overflow(config);
                 }
                 await new Promise((resolve) => waiters.push(resolve));

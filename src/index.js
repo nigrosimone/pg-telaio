@@ -270,6 +270,8 @@ function createSql(pool, options = {}) {
             maxPipeline,
             stallMillis: stallMillis === false ? 0 : stallMillis,
             // where a query goes while every pipelined connection is stuck behind a slow one
+            // the pool takes the queries while every pipelined connection is blocked, so it
+            // needs room: a one-connection pool would serialise the whole worker there
             overflow: (cfg) => pool.query(cfg)
         });
     }
