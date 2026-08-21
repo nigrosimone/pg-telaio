@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2](https://github.com/nigrosimone/pg-telaio/compare/v0.1.1...v0.1.2) (2026-08-21)
+
+### Bug Fixes
+
+* the stall guard keeps its opinion at the cap and confirms it after a pause ([382aea5](https://github.com/nigrosimone/pg-telaio/commit/382aea5409ef5c265e76b462eb2650fc954181fe))
+
 ## [0.1.1](https://github.com/nigrosimone/pg-telaio/compare/v0.1.0...v0.1.1) (2026-08-21)
 
 ### Bug Fixes
