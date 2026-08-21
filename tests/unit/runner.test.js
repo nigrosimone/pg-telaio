@@ -88,11 +88,11 @@ test("direct routes past the dispatcher to the pool", async () => {
     const pool = { options: {}, Client: FakeClient, query: async (cfg) => ({ route: "pool", cfg }) };
     const tag = createSql(pool, { pipeline: 2 });
     assert.strictEqual(tag.pipelining, 2);
-    // the dispatcher's own clients are asked to pipeline
-    assert.strictEqual(clientConfigs[0].pipeline, true);
-
+    // nothing opens until a query asks; the client that then opens is asked to pipeline
+    assert.strictEqual(clientConfigs.length, 0);
     const piped = await tag`select 1`;
     assert.strictEqual(piped.route, "dispatcher");
+    assert.strictEqual(clientConfigs[0].pipeline, true);
 
     const direct = await tag.direct`select 1`;
     assert.strictEqual(direct.route, "pool");
@@ -316,6 +316,7 @@ test("the dispatcher gets the pool's config with its hidden secrets restored", a
     Object.defineProperty(options.ssl, "key", { value: "PEM", enumerable: false });
     const pool = { options, Client: FakeClient, query: async (cfg) => cfg };
     const tag = createSql(pool, { pipeline: 1 });
+    await tag`select 1`;
     const cfg = clientConfigs[0];
     assert.strictEqual(cfg.password, "hunter2");
     assert.strictEqual(cfg.ssl.key, "PEM");
@@ -385,9 +386,11 @@ test("auto is the default and opens connections while the pool cannot pipeline",
     const pool = { options: {}, Client: FakeClient, query: async (cfg) => ({ route: "pool", cfg }) };
     const tag = createSql(pool);
     assert.strictEqual(tag.pipelining, 3);
-    assert.strictEqual(clientConfigs.length, 3);
+    // capacity, not connections: nothing opens before a query does
+    assert.strictEqual(clientConfigs.length, 0);
     const got = await tag`select 1`;
     assert.strictEqual(got.route, "dispatcher");
+    assert.strictEqual(clientConfigs.length, 1);
     await tag.close();
 });
 

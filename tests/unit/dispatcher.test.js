@@ -55,11 +55,13 @@ test("a connect failure is not an unhandled rejection, and the query gets the er
         const boom = new Error("connect refused");
         const { Client } = fakeClient({ connect: () => Promise.reject(boom) });
         const dispatcher = createDispatcher(Client, {}, { connections: 3, maxPipeline: 100 });
-        // nothing awaits the three failed connects; two macrotask turns let any unhandled
-        // rejection fire before the assert
+        // a concurrent pair opens two slots, both connects fail, both queries get the error
+        const q1 = assert.rejects(() => dispatcher.query({ text: "select 1" }), /connect refused/);
+        const q2 = assert.rejects(() => dispatcher.query({ text: "select 2" }), /connect refused/);
+        await Promise.all([q1, q2]);
+        // a macrotask turn lets any unhandled rejection from the failed connects fire
         await new Promise((resolve) => setTimeout(resolve, 20));
         assert.deepStrictEqual(rejections, []);
-        await assert.rejects(() => dispatcher.query({ text: "select 1" }), /connect refused/);
         await dispatcher.close();
     } finally {
         process.off("unhandledRejection", onUnhandled);
@@ -70,12 +72,13 @@ test("close() is terminal: later queries are refused and nothing is respawned", 
     const { Client, created } = fakeClient();
     const dispatcher = createDispatcher(Client, {}, { connections: 2, maxPipeline: 100 });
     await dispatcher.query({ text: "select 1" });
+    // one sequential query opens one connection; the second slot stays unused capacity
+    assert.strictEqual(created.length, 1);
     await dispatcher.close();
-    assert.strictEqual(created.length, 2);
     assert.ok(created.every((client) => client.ended >= 1));
     await assert.rejects(() => dispatcher.query({ text: "select 1" }), /closed/);
     // the refused query must not have opened a replacement connection
-    assert.strictEqual(created.length, 2);
+    assert.strictEqual(created.length, 1);
 });
 
 test("close() wakes a queued waiter, which is refused instead of sleeping forever", async () => {
@@ -94,6 +97,73 @@ test("close() wakes a queued waiter, which is refused instead of sleeping foreve
     release({});
     await first;
     await closing;
+});
+
+test("connections open on demand: none at creation, one for sequential load", async () => {
+    const { Client, created } = fakeClient();
+    const dispatcher = createDispatcher(Client, {}, { connections: 3, maxPipeline: 100 });
+    assert.strictEqual(created.length, 0);
+    for (let i = 0; i < 5; i++) {
+        await dispatcher.query({ text: "select " + i });
+    }
+    // an idle open connection beats opening another, so sequential queries share one
+    assert.strictEqual(created.length, 1);
+    await dispatcher.close();
+});
+
+test("a concurrent burst grows the connections to the cap and no further", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const { Client, created } = fakeClient({ query: () => gate });
+    const dispatcher = createDispatcher(Client, {}, { connections: 3, maxPipeline: 100 });
+    const queries = Array.from({ length: 8 }, (_, i) => dispatcher.query({ text: "select " + i }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(created.length, 3);
+    release({});
+    await Promise.all(queries);
+    assert.strictEqual(created.length, 3);
+    await dispatcher.close();
+});
+
+test("a stall recruits an unused slot before it takes the overflow", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    let queries = 0;
+    const { Client, created } = fakeClient({
+        query: (cfg) => {
+            queries++;
+            // the first query, on the first connection, never answers
+            return queries === 1 ? gate : Promise.resolve({ route: "pipeline", cfg });
+        }
+    });
+    const overflowed = [];
+    const dispatcher = createDispatcher(
+        Client,
+        {},
+        {
+            connections: 2,
+            maxPipeline: 100,
+            stallMillis: 10,
+            overflow: async (cfg) => {
+                overflowed.push(cfg);
+                return { route: "overflow", cfg };
+            }
+        }
+    );
+    const slow = dispatcher.query({ text: "slow" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    // the first connection is stalled, the second was never opened: open it, skip the pool
+    const during = await dispatcher.query({ text: "fast" });
+    assert.strictEqual(during.route, "pipeline");
+    assert.strictEqual(created.length, 2);
+    assert.strictEqual(overflowed.length, 0);
+    release({ route: "pipeline" });
+    await slow;
+    await dispatcher.close();
 });
 
 test("a connection that stops answering is left alone and the queries ride the overflow", async () => {

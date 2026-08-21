@@ -155,7 +155,7 @@ declare module "pg-telaio" {
         close(): Promise<void>;
         /** `await using sql = createSql(pool)`: close() at scope exit. The syntax needs Node 24. */
         [Symbol.asyncDispose](): Promise<void>;
-        /** How many connections the tag opened next to the pool; 0 means everything rides pool.query(). */
+        /** How many connections the tag may open next to the pool, on demand; 0 means everything rides pool.query(). */
         readonly pipelining: number;
     }
 

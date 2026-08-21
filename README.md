@@ -175,10 +175,12 @@ await pool.query(sql`select * from items where id = ${id}`.named("items"));
 and there is nothing to pipeline.
 
 Until pg's own pool does it, the tag keeps a few connections of its own next to the pool, in
-pipeline mode, and sends each query to the one with the fewest results outstanding. `maxPipeline`
+pipeline mode, opened on demand the way the pool's are: an idle open connection is preferred,
+the next one opens only when every open one is busy. Each query goes to the connection with the
+fewest results outstanding. `maxPipeline`
 caps the queries in flight per connection; past the cap, callers queue. The day the pool pipelines
 by itself, `pipeline: "auto"` detects it, opens nothing, and every query goes back through
-`pool.query()` with no code change. `sql.pipelining` says how many connections the tag opened; 0
+`pool.query()` with no code change. `sql.pipelining` says how many connections the tag may open; 0
 means everything already rides the pool.
 
 `sql.close()` closes only those connections. The pool is the caller's and is never ended here.

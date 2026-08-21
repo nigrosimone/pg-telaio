@@ -13,8 +13,8 @@
 // as pg itself cannot do that: `pipeline: true` exists in pg since 8.23.0 but does nothing
 // through `pool.query()`, because the pool checks out a connection per query and a second query
 // never sits behind a first. Until then the tag keeps a few connections of its own next to the
-// pool; the day the pool pipelines, `auto` opens nothing and every query goes back through
-// `pool.query()` with no code change.
+// pool, opened on demand like the pool's; the day the pool pipelines, `auto` opens nothing and
+// every query goes back through `pool.query()` with no code change.
 //
 // The pool keeps everything else. Transactions, LISTEN/NOTIFY and COPY go through
 // `pool.connect()` as always: a pipelined connection carries queries from several callers at
@@ -325,8 +325,8 @@ function createSql(pool, options = {}) {
         // Node 24. Note the siblings share the dispatcher, so disposing any of them closes it
         // for all, the same way close() does.
         tag[Symbol.asyncDispose] = tag.close;
-        // how many connections the tag opened next to the pool: 0 means everything already
-        // rides pool.query()
+        // how many connections the tag may open next to the pool, on demand: 0 means
+        // everything already rides pool.query()
         tag.pipelining = connections;
         return tag;
     };

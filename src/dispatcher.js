@@ -32,7 +32,7 @@ function isConnectionError(err) {
  * @param {new (config: object) => any} Client the pg Client class to instantiate
  * @param {object} config connection config, the pool's own with its non-enumerable secrets restored
  * @param {object} opts
- * @param {number} opts.connections how many clients to keep
+ * @param {number} opts.connections how many clients it may open; they open on demand
  * @param {number} opts.maxPipeline queries in flight per client before callers queue
  * @param {number} [opts.stallMillis] how long a connection may go without a reply before new
  *   queries stop being sent to it; 0 turns the guard off
@@ -41,7 +41,9 @@ function isConnectionError(err) {
  * @returns {{ query: (config: object) => Promise<any>, close: () => Promise<any> }}
  */
 function createDispatcher(Client, config, { connections, maxPipeline, stallMillis = 0, overflow = null }) {
-    const slots = [];
+    // a null slot is capacity that was never asked for: nothing is opened until a query picks
+    // the slot, so a tag over an idle pool costs zero connections, the way the pool itself does
+    const slots = new Array(connections).fill(null);
     const waiters = [];
     let closed = false;
 
@@ -95,10 +97,6 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
         slots[i] = slot;
     };
 
-    for (let i = 0; i < connections; i++) {
-        spawn(i);
-    }
-
     /**
      * The slot with the fewest queries in flight, or null when every slot is at the cap or
      * stalled - `stalled` says which of the two, because a cap clears as soon as a reply lands
@@ -106,13 +104,25 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
      * `slot.ready` anyway. Skipping it instead meant that with every connection dead there was
      * nothing to pick, the caller queued, and nobody ever woke it up.
      *
+     * An idle open connection beats opening another; anything less - every open slot busy,
+     * stalled or at the cap - opens the next unused slot instead. That is how the dispatcher
+     * grows to `connections` only under load, and how a stall recruits fresh capacity before
+     * falling back on the overflow.
+     *
      * @returns {{ slot: any|null, stalled: boolean }}
      */
     const pick = () => {
         let best = null;
         let stalled = false;
+        let unused = -1;
         const now = performance.now();
         for (let i = 0; i < slots.length; i++) {
+            if (slots[i] === null) {
+                if (unused === -1) {
+                    unused = i;
+                }
+                continue;
+            }
             if (slots[i].dead) {
                 // never after close(): a respawn there would open a connection nobody closes
                 if (closed) {
@@ -131,6 +141,10 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
             if (best === null || slot.inflight < best.inflight) {
                 best = slot;
             }
+        }
+        if ((best === null || best.inflight > 0) && unused !== -1 && !closed) {
+            spawn(unused);
+            return { slot: slots[unused], stalled: false };
         }
         return { slot: best, stalled };
     };
@@ -202,7 +216,7 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
             for (const waiter of waiters.splice(0)) {
                 waiter();
             }
-            return Promise.all(slots.map((slot) => slot.client.end().catch(() => {})));
+            return Promise.all(slots.filter(Boolean).map((slot) => slot.client.end().catch(() => {})));
         }
     };
 }
