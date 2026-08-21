@@ -1,0 +1,214 @@
+name: Release
+
+# Two ways in, one job.
+#
+#   - Dispatch it here, and the job runs release-it itself: it bumps the version,
+#     writes the CHANGELOG, commits, tags, pushes and then publishes.
+#   - Or run `npm run release` locally and push the tag it creates, which lands
+#     on the same job with the bump already done.
+#
+# The dispatch path has to publish in the same run: a tag pushed with
+# GITHUB_TOKEN does not trigger another workflow, so waiting for the tag half to
+# fire would wait forever.
+on:
+    push:
+        tags: ["v*"]
+    workflow_dispatch:
+        inputs:
+            release_type:
+                description: 'Bump ("auto" lets the conventional commits choose)'
+                type: choice
+                options: [auto, patch, minor, major]
+                default: auto
+            version:
+                description: "Explicit version, e.g. 1.2.0. When given, it wins over the bump choice."
+                type: string
+                required: false
+            dry_run:
+                description: "Bump and test, but skip the tag, the push and the publish"
+                type: boolean
+                default: false
+
+# A dispatch and a tag push must not overlap: both would publish.
+concurrency:
+    group: release
+    cancel-in-progress: false
+
+permissions:
+    # `write` is what lets the dispatch path push the release commit and the tag.
+    # The tag path never uses it.
+    contents: write
+    # Required by npm trusted publishing: npm exchanges this short lived OIDC
+    # token for a publish credential, so no NPM_TOKEN secret is needed.
+    id-token: write
+
+env:
+    # the release commits on the runner: git hooks have no business running there
+    HUSKY: 0
+
+jobs:
+    publish:
+        name: Publish to npm
+        runs-on: ubuntu-latest
+        services:
+            # a release must not skip the real-database suite, so the job carries
+            # the same postgres the test workflow uses
+            postgres:
+                image: postgres:18
+                env:
+                    POSTGRES_USER: bench
+                    POSTGRES_PASSWORD: bench
+                    POSTGRES_DB: benchmark
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        steps:
+            - name: Only dispatch a release from the default branch
+              if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch
+              run: |
+                  echo "::error::a dispatched release must run on ${{ github.event.repository.default_branch }}, got ${{ github.ref_name }}"
+                  exit 1
+
+            - uses: actions/checkout@v7
+              with:
+                  # release-it reads the tags to work out the bump and the changelog
+                  fetch-depth: 0
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 24.x
+                  cache: npm
+                  registry-url: https://registry.npmjs.org
+
+            # Cheap, and it runs before anything else: on this path the version is
+            # already decided, so a mismatch can only mean the tag was cut by hand.
+            - name: Check the tag matches the package version
+              if: github.ref_type == 'tag'
+              run: |
+                  tag="${GITHUB_REF_NAME#v}"
+                  version="$(node -p 'require("./package.json").version')"
+                  if [ "$tag" != "$version" ]; then
+                    echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+                    exit 1
+                  fi
+
+            - run: npm ci
+
+            # Nothing is tagged or published until all of this passes.
+            - run: npm run lint
+            - run: npm run format:check
+            - run: npm run typecheck
+            - run: npm test
+            - run: npm run test:integration
+              env:
+                  DATABASE_URL: postgres://bench:bench@localhost:5432/benchmark
+                  # the suites skip when the database is unreachable; here that must fail instead
+                  REQUIRE_DB: "1"
+
+            # release-it is configured with `npm.publish: false`, so this only touches
+            # git: bump, CHANGELOG, commit, tag, push. The publish is the step below,
+            # shared with the tag path.
+            - name: Cut the release
+              if: github.event_name == 'workflow_dispatch'
+              env:
+                  RELEASE_TYPE: ${{ inputs.release_type }}
+                  VERSION: ${{ inputs.version }}
+                  DRY_RUN: ${{ inputs.dry_run }}
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  # release-it ends on a bare `git push --follow-tags`, which needs one
+                  git branch --set-upstream-to "origin/$GITHUB_REF_NAME"
+                  args=(--ci)
+                  # an explicit version wins over the bump choice and over the commits
+                  if [ -n "$VERSION" ]; then
+                    args+=("$VERSION")
+                  elif [ "$RELEASE_TYPE" != auto ]; then
+                    args+=("$RELEASE_TYPE")
+                  fi
+                  if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+                  npx release-it "${args[@]}"
+
+            # Whichever path got here, the manifest now names the version to publish. Already there
+            # is not an error: a version published by hand still gets its tag pushed afterwards.
+            - name: Check whether the version is on npm already
+              id: onNpm
+              if: ${{ !inputs.dry_run }}
+              run: |
+                  name="$(node -p 'require("./package.json").name')"
+                  version="$(node -p 'require("./package.json").version')"
+                  if npm view "$name@$version" version >/dev/null 2>&1; then
+                    echo "::notice::$name@$version is on npm already, skipping the publish"
+                    echo "skip=true" >> "$GITHUB_OUTPUT"
+                    echo "$name v$version was already published" >> "$GITHUB_STEP_SUMMARY"
+                  else
+                    echo "skip=false" >> "$GITHUB_OUTPUT"
+                    echo "Publishing $name v$version" >> "$GITHUB_STEP_SUMMARY"
+                  fi
+
+            # Trusted publishing needs npm 11.5.1 or newer. Upgraded only now, so that the
+            # npm shipped with the runner is the one that runs `npm ci`
+            - name: Use an npm that can publish with OIDC
+              if: ${{ !inputs.dry_run && steps.onNpm.outputs.skip != 'true' }}
+              run: npm install -g npm@latest
+
+            - name: Publish
+              if: ${{ !inputs.dry_run && steps.onNpm.outputs.skip != 'true' }}
+              env:
+                  # only until the package exists on npm and trusted publishing can be set up on it.
+                  # With no secret, npm falls back to OIDC
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: |
+                  # a prerelease published without a tag still becomes latest, so 1.0.0-rc.1 goes
+                  # under "rc" and `npm i pg-telaio` keeps handing out the last stable one
+                  tag="$(node -p 'const pre = require("./package.json").version.split("-")[1]; pre ? pre.split(".")[0] : "latest"')"
+                  # sigstore only attests public repositories, and npm refuses the flag on a
+                  # private one (E422), so provenance rides along only once the repo is public
+                  provenance=""
+                  if [ "${{ github.event.repository.private }}" = "false" ]; then
+                    provenance="--provenance"
+                  fi
+                  echo "Publishing under the $tag tag $provenance" >> "$GITHUB_STEP_SUMMARY"
+                  npm publish $provenance --tag "$tag"
+
+            # The same run that publishes also cuts the GitHub release, with this version's
+            # changelog section as the notes. Idempotent, so a re-run after a failed publish
+            # does not duplicate it.
+            - name: GitHub release
+              if: ${{ !inputs.dry_run }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version="$(node -p 'require("./package.json").version')"
+                  tag="v$version"
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                    echo "release $tag exists already" >> "$GITHUB_STEP_SUMMARY"
+                    exit 0
+                  fi
+                  node -e '
+                    const fs = require("fs");
+                    const version = require("./package.json").version;
+                    const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
+                    // conventional-changelog writes versions as "# [x.y.z](url) (date)" or bare
+                    // "## x.y.z (date)"; the ### headings inside a section are not versions
+                    const isVersion = (l) => l.startsWith("# ") || l.startsWith("## ");
+                    const mine = (l) => l.includes("[" + version + "]") || l.includes(" " + version + " ");
+                    const start = lines.findIndex((l) => isVersion(l) && mine(l));
+                    let notes = "See CHANGELOG.md";
+                    if (start !== -1) {
+                      let end = lines.length;
+                      for (let i = start + 1; i < lines.length; i++) {
+                        if (isVersion(lines[i])) { end = i; break; }
+                      }
+                      notes = lines.slice(start, end).join("\n").trim();
+                    }
+                    fs.writeFileSync("release-notes.md", notes + "\n");
+                  '
+                  prerelease=""
+                  case "$version" in *-*) prerelease="--prerelease";; esac
+                  gh release create "$tag" --title "$tag" --notes-file release-notes.md $prerelease
+                  echo "GitHub release $tag created" >> "$GITHUB_STEP_SUMMARY"

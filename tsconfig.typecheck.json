@@ -1,0 +1,26 @@
+{
+    // The config the `typecheck` script uses, scoped to the shipped source: checkJs over src/
+    // only, reading the JSDoc types, with no output.
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "ES2022",
+        // Symbol.asyncDispose in the d.ts needs the disposable lib on top of ES2022
+        "lib": ["ES2022", "ESNext.Disposable"],
+        "allowJs": true,
+        "checkJs": true,
+        "strict": false,
+        "noImplicitThis": true,
+        "useUnknownInCatchVariables": true,
+        "strictFunctionTypes": true,
+        "strictBindCallApply": true,
+        "alwaysStrict": true,
+        "strictNullChecks": true,
+        "strictPropertyInitialization": true,
+        "noEmit": true,
+        // the declaration files shipped by the dependencies are their problem, not ours
+        "skipLibCheck": true,
+        "types": ["node"]
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "coverage"]
+}

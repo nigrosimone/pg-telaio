@@ -1,0 +1,67 @@
+{
+    "name": "pg-telaio",
+    "version": "0.0.0",
+    "description": "A sql tagged template for node-postgres, with pipelined queries underneath, without replacing its Pool",
+    "main": "src/index.js",
+    "types": "src/types.d.ts",
+    "exports": {
+        ".": {
+            "types": "./src/types.d.ts",
+            "default": "./src/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nigrosimone/pg-telaio.git"
+    },
+    "bugs": {
+        "url": "https://github.com/nigrosimone/pg-telaio/issues"
+    },
+    "homepage": "https://github.com/nigrosimone/pg-telaio#readme",
+    "scripts": {
+        "test": "node --test --test-timeout=60000 \"tests/unit/*.test.js\"",
+        "test:integration": "node --test --test-timeout=120000 --test-concurrency=1 \"tests/integration/*.test.js\"",
+        "cover": "nyc --silent npm run test && nyc --silent --no-clean npm run test:integration && nyc report",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "prepare": "husky",
+        "release": "release-it",
+        "typecheck": "tsc -p tsconfig.typecheck.json",
+        "bench": "node bench/bench.js",
+        "bench:loss": "node bench/kill.js"
+    },
+    "engines": {
+        "node": ">=22"
+    },
+    "files": [
+        "src",
+        "LICENSE",
+        "README.md"
+    ],
+    "author": "Nigro Simone",
+    "license": "Apache-2.0",
+    "peerDependencies": {
+        "pg": ">=8.23.0"
+    },
+    "devDependencies": {
+        "@commitlint/cli": "^21.2.1",
+        "@commitlint/config-conventional": "^21.2.0",
+        "@eslint/js": "^10.0.1",
+        "@release-it/conventional-changelog": "^12.0.0",
+        "@types/node": "^26.2.0",
+        "@types/pg": "^8.23.1",
+        "eslint": "^10.8.1",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-plugin-jsdoc": "^64.2.1",
+        "globals": "^17.11.0",
+        "husky": "^9.1.7",
+        "nyc": "^18.0.0",
+        "pg": "8.23.0",
+        "prettier": "^3.9.6",
+        "release-it": "^21.0.1",
+        "typescript": "^6.0.3"
+    }
+}

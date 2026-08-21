@@ -1,0 +1,10 @@
+node_modules
+coverage
+.nyc_output
+package-lock.json
+
+# the measuring scripts and the examples keep their own compact style, eslint skips them too
+bench
+examples
+
+LICENSE

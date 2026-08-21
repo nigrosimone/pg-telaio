@@ -1,0 +1,72 @@
+name: Run tests
+
+on:
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
+
+# nothing here writes to the repository
+permissions:
+    contents: read
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                node-version: [22, 24, 26]
+        services:
+            # the integration tests create their own scratch tables, they only need the database
+            postgres:
+                image: postgres:18
+                env:
+                    POSTGRES_USER: bench
+                    POSTGRES_PASSWORD: bench
+                    POSTGRES_DB: benchmark
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        steps:
+            - name: Checkout Source Tree
+              uses: actions/checkout@v7
+
+            - name: Cache Node.js dependencies
+              uses: actions/cache@v6
+              with:
+                  path: ~/.npm
+                  key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+                  restore-keys: |
+                      ${{ runner.os }}-node-
+
+            - name: Setup Node.js environment
+              uses: actions/setup-node@v7
+              with:
+                  node-version: "${{ matrix.node-version }}"
+
+            - name: Install dependencies
+              run: npm install --include=dev
+
+            - name: Lint
+              run: npm run lint
+
+            - name: Check formatting
+              run: npm run format:check
+
+            - name: Type check the source
+              run: npm run typecheck
+
+            - name: Run unit tests
+              run: npm run test
+
+            - name: Run integration tests
+              run: npm run test:integration
+              env:
+                  DATABASE_URL: postgres://bench:bench@localhost:5432/benchmark
+                  # the suites skip when the database is unreachable; in CI that must fail instead
+                  REQUIRE_DB: "1"
