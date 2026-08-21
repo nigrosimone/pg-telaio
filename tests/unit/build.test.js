@@ -105,3 +105,16 @@ test("the built object is what pool.query accepts", async () => {
     const got = await pool.query(sql`select * from items where id = ${42}`);
     assert.deepStrictEqual(got, { text: "select * from items where id = $1", values: [42], name: undefined });
 });
+
+test("two levels of nesting renumber in position, with values on both sides of each fragment", () => {
+    // every level contributes before and after the fragment it splices, so a compiler that
+    // collected the fragment parameters first would come out in a different order
+    const inner = sql`quantity < ${3}`;
+    const mid = sql`price > ${10} and ${inner} and name like ${"a%"}`;
+    const q = sql`select * from items where id = ${1} and (${mid}) and active = ${true}`;
+    assert.strictEqual(
+        q.text,
+        "select * from items where id = $1 and (price > $2 and quantity < $3 and name like $4) and active = $5"
+    );
+    assert.deepStrictEqual(q.values, [1, 10, 3, "a%", true]);
+});

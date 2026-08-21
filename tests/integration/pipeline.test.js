@@ -63,6 +63,29 @@ test("pipeline", async (t) => {
             }
         });
 
+        await t.test("prepare: a sibling tag reuses the statement instead of preparing its own", async () => {
+            // one connection, so the three calls land on the session that prepared the statement
+            const sql = createSql(pool, { prepare: true, pipeline: 1 });
+            try {
+                // the same text through three tags, with a comment that only this test uses
+                const one = await sql`select id from items where id = ${1} /* sibling probe */`;
+                const two = await sql.prepared`select id from items where id = ${2} /* sibling probe */`;
+                const optioned = sql.options({ prepare: true });
+                const three = await optioned`select id from items where id = ${3} /* sibling probe */`;
+                assert.deepStrictEqual([one.rows[0].id, two.rows[0].id, three.rows[0].id], [1, 2, 3]);
+
+                const like = "%sibling probe%";
+                const check = await sql.unprepared`
+                    select count(*)::int as n, sum(generic_plans + custom_plans)::int as runs
+                    from pg_prepared_statements where statement like ${like}`;
+                // one statement for the three tags, and all three calls ran it
+                assert.strictEqual(check.rows[0].n, 1);
+                assert.strictEqual(check.rows[0].runs, 3);
+            } finally {
+                await sql.close();
+            }
+        });
+
         await t.test("prefix: the prepared statement carries the chosen name prefix", async () => {
             const sql = createSql(pool, { prepare: true, pipeline: 1, prefix: "myapp" });
             try {

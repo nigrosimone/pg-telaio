@@ -398,3 +398,111 @@ test("the pure builder keeps prepare across a derive that does not mention it", 
     const q = sql.options({ prepare: true }).direct`select id from items /* runner-builder-derive */`;
     assert.match(q.name, /^telaio_\d+$/);
 });
+
+test("copies of the same query in flight agree on one fresh name after a retryable failure", async () => {
+    const names = [];
+    let failuresLeft = 4;
+    const pool = {
+        options: {},
+        query: async (cfg) => {
+            names.push(cfg.name);
+            if (failuresLeft > 0) {
+                failuresLeft--;
+                throw Object.assign(new Error("cached plan must not change result type"), { code: "0A000" });
+            }
+            return cfg;
+        }
+    };
+    const tag = createSql(pool, { pipeline: false, prepare: true });
+
+    const running = [];
+    for (let i = 0; i < 4; i++) {
+        // .then() is what sends it, so the four first attempts leave before any retry
+        running.push(tag`select id from items /* runner-concurrent-retry */`.then((r) => r));
+    }
+    await Promise.all(running);
+
+    assert.strictEqual(names.length, 8);
+    const attempts = names.slice(0, 4);
+    const retries = names.slice(4);
+    // one name for the four copies, and one new name for their four retries: a name per retry
+    // would leave the server parsing the same text four times over
+    assert.strictEqual(new Set(attempts).size, 1);
+    assert.strictEqual(new Set(retries).size, 1);
+    assert.notStrictEqual(retries[0], attempts[0]);
+    assert.match(retries[0], /^telaio_\d+$/);
+});
+
+test("a connection error is not retried, even on a prepared tag with retry on", async () => {
+    // only 0A000 and 26000 mean the statement died rather than the query; a dead socket is the
+    // caller's to see at once, with no second attempt
+    for (const failure of [
+        Object.assign(new Error("Connection terminated unexpectedly"), { code: "ECONNRESET" }),
+        new Error("Connection terminated unexpectedly")
+    ]) {
+        const calls = [];
+        const pool = {
+            options: {},
+            query: async (cfg) => {
+                calls.push(cfg);
+                throw failure;
+            }
+        };
+        const tag = createSql(pool, { pipeline: false, prepare: true, retry: true });
+        await assert.rejects(
+            async () => {
+                await tag`select id from items /* runner-connection-error */`;
+            },
+            (err) => err === failure
+        );
+        assert.strictEqual(calls.length, 1);
+        // it really was on the prepared path, where a retry would have been possible
+        assert.match(calls[0].name, /^telaio_\d+$/);
+    }
+});
+
+test("the statement names are shared across siblings and across tags", async () => {
+    const pool = fakePool();
+    const one = createSql(pool, { pipeline: false, prepare: true });
+    const two = createSql(pool, { pipeline: false, prepare: true });
+
+    const a = await one`select id from items /* runner-shared-names */`;
+    const b = await two`select id from items /* runner-shared-names */`;
+    assert.match(a.name, /^telaio_\d+$/);
+    // parse once means once per connection for everybody, not once per tag
+    assert.strictEqual(b.name, a.name);
+
+    const other = await two`select name from items /* runner-shared-names */`;
+    assert.notStrictEqual(other.name, a.name);
+
+    const sibling = await createSql(pool, { pipeline: false, prepare: false })
+        .prepared`select id from items /* runner-shared-names */`;
+    assert.strictEqual(sibling.name, a.name);
+
+    // the pure builder names the same text the same way, so a query built there and run through
+    // pool.query() reuses the statement the tag prepared
+    assert.strictEqual(sql.prepared`select id from items /* runner-shared-names */`.name, a.name);
+});
+
+test("the retry keeps the text and the values, only the name changes", async () => {
+    const calls = [];
+    const pool = {
+        options: {},
+        query: async (cfg) => {
+            calls.push({ ...cfg });
+            if (calls.length === 1) {
+                throw Object.assign(new Error("cached plan must not change result type"), { code: "0A000" });
+            }
+            return cfg;
+        }
+    };
+    const tag = createSql(pool, { pipeline: false, prepare: true });
+    const cond = tag`price > ${10}`;
+    await tag`select id from items where ${cond} and tags = ${tag.json(["a"])} and id = ${7} /* runner-retry-payload */`;
+
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(calls[0].values, [10, '["a"]', 7]);
+    assert.strictEqual(calls[1].text, calls[0].text);
+    assert.deepStrictEqual(calls[1].values, calls[0].values);
+    assert.notStrictEqual(calls[1].name, calls[0].name);
+});

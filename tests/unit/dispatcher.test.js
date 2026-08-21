@@ -99,6 +99,32 @@ test("close() wakes a queued waiter, which is refused instead of sleeping foreve
     await closing;
 });
 
+test("close() refuses every caller queued behind maxPipeline, not only the first", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const { Client, created } = fakeClient({ query: () => gate });
+    // one connection, one query in flight allowed: the other three sit in the cap's queue
+    const dispatcher = createDispatcher(Client, {}, { connections: 1, maxPipeline: 1 });
+    const inflight = dispatcher.query({ text: "one" });
+    const queued = [
+        dispatcher.query({ text: "two" }),
+        dispatcher.query({ text: "three" }),
+        dispatcher.query({ text: "four" })
+    ];
+    await new Promise((resolve) => setImmediate(resolve));
+    // the handlers go on before close(), so a refusal cannot be an unhandled rejection here
+    const refusals = queued.map((query) => assert.rejects(() => query, /closed/));
+    const closing = dispatcher.close();
+    await Promise.all(refusals);
+    // the query already on the wire still gets its reply, and nothing was respawned
+    release({ text: "one" });
+    assert.deepStrictEqual(await inflight, { text: "one" });
+    await closing;
+    assert.strictEqual(created.length, 1);
+});
+
 test("connections open on demand: none at creation, one for sequential load", async () => {
     const { Client, created } = fakeClient();
     const dispatcher = createDispatcher(Client, {}, { connections: 3, maxPipeline: 100 });
@@ -124,6 +150,35 @@ test("a concurrent burst grows the connections to the cap and no further", async
     release({});
     await Promise.all(queries);
     assert.strictEqual(created.length, 3);
+    await dispatcher.close();
+});
+
+test("a dead slot is replaced, not counted as capacity twice: a later burst stops at the cap", async () => {
+    let release;
+    let gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const { Client, created } = fakeClient({ query: () => gate });
+    const dispatcher = createDispatcher(Client, {}, { connections: 3, maxPipeline: 100 });
+
+    const first = Array.from({ length: 8 }, (_, i) => dispatcher.query({ text: "a" + i }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(created.length, 3);
+    release({});
+    await Promise.all(first);
+
+    // the second connection dies while idle, the way pg reports a socket that went away
+    created[1].handlers.error(new Error("server closed the connection unexpectedly"));
+    gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const second = Array.from({ length: 8 }, (_, i) => dispatcher.query({ text: "b" + i }));
+    await new Promise((resolve) => setImmediate(resolve));
+    // the dead slot was respawned in place: four clients ever, three of them alive
+    assert.strictEqual(created.length, 4);
+    assert.strictEqual(created.filter((client) => client.ended === 0).length, 3);
+    release({});
+    await Promise.all(second);
     await dispatcher.close();
 });
 

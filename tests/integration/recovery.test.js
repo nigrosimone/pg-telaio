@@ -66,6 +66,105 @@ test("recovery", async (t) => {
             }
         });
 
+        await t.test("a schema change is survived with other queries in flight on the connections", async () => {
+            // three connections and four workers, so the alter lands while queries are already on
+            // the wire; the stall guard is off so a slow moment cannot move them to the pool
+            const sql = createSql(pool, { prepare: true, pipeline: 3, stallMillis: false });
+            let stop = false;
+            let ints = 0;
+            let texts = 0;
+            const wrong = [];
+            const failures = [];
+
+            // each worker asks a question only it can be answered with: `who` comes back from
+            // its own parameter, so a reply delivered to the wrong caller shows up as a mismatch
+            // instead of passing for a right answer
+            const worker = async (who) => {
+                let sent = 0;
+                // bounded: a retry that never recovers must fail an assertion, not spin until
+                // the heap gives out
+                while (!stop && sent < 400) {
+                    sent++;
+                    try {
+                        const { rows } =
+                            await sql`select ${who}::int as who, v from telaio_test_inflight where id = ${1}`;
+                        if (rows[0].who !== who) {
+                            wrong.push(who + " got " + rows[0].who);
+                            continue;
+                        }
+                        const v = rows[0].v;
+                        if (v === 42) {
+                            ints++;
+                        } else if (v === "42") {
+                            texts++;
+                        } else {
+                            // neither the old type nor the new one: a reply from another query
+                            wrong.push(who + " got v " + v);
+                        }
+                    } catch (err) {
+                        failures.push(err);
+                    }
+                }
+            };
+
+            const main = async () => {
+                const workers = [];
+                for (let i = 0; i < 4; i++) {
+                    workers.push(worker(i));
+                }
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                // the alter runs on the pool, so it is concurrent with the pipelined stream
+                await pool.query("alter table telaio_test_inflight alter column v type text");
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                stop = true;
+                await Promise.all(workers);
+            };
+
+            let timer;
+            const watchdog = new Promise((resolve, reject) => {
+                timer = setTimeout(
+                    () => reject(new Error("watchdog: the workers hung for 15s around the alter")),
+                    15000
+                );
+            });
+            try {
+                await pool.query("drop table if exists telaio_test_inflight");
+                await pool.query("create table telaio_test_inflight (id int primary key, v int)");
+                await pool.query("insert into telaio_test_inflight values (1, 42)");
+                await Promise.race([main(), watchdog]);
+
+                assert.deepStrictEqual(wrong, [], "a query got a reply that was not its own");
+                // the retry is the only thing that may fail here, and only with the code it handles
+                const unexpected = failures.filter((err) => err.code !== "0A000" && err.code !== "26000");
+                assert.deepStrictEqual(
+                    unexpected.map((err) => err.code + " " + err.message),
+                    []
+                );
+                assert.ok(ints > 0, "no query ran before the alter");
+                assert.ok(texts > 0, "every query after the alter failed (" + failures.length + " failures)");
+                // a retry that gave up would leave a stream of handled codes behind it: the point
+                // of the retry is that the caller does not see them
+                assert.ok(
+                    failures.length < ints + texts,
+                    "more queries failed (" + failures.length + ") than came back (" + (ints + texts) + ")"
+                );
+
+                // and the connections are all usable afterwards, with the new type
+                const after = await Promise.all(
+                    Array.from({ length: 6 }, () => sql`select v from telaio_test_inflight where id = ${1}`)
+                );
+                assert.deepStrictEqual(
+                    after.map((r) => r.rows[0].v),
+                    ["42", "42", "42", "42", "42", "42"]
+                );
+            } finally {
+                clearTimeout(timer);
+                stop = true;
+                await sql.close();
+                await pool.query("drop table if exists telaio_test_inflight").catch(() => {});
+            }
+        });
+
         await t.test("connections killed under load keep answering after", async () => {
             const sql = createSql(pool, { prepare: true });
             let stop = false;
