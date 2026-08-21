@@ -23,6 +23,25 @@ await sql.close(); // closes only what the tag opened, the pool stays up
 
 The package is CommonJS and works from ESM unchanged: `import { createSql } from "pg-telaio"`.
 
+## TypeScript
+
+The types ship with the package, hand written in `src/types.d.ts`, so there is nothing to install
+next to it. A query takes the row type it returns:
+
+```ts
+interface Item {
+    id: number;
+    name: string;
+}
+
+const { rows } = await sql<Item>`select id, name from items where id = ${id}`;
+rows[0].name; // string
+```
+
+The helpers, the siblings and the options are typed the same way, and the pure builder is typed as
+what it is: a thing that builds, not a promise, so awaiting one is a compile error and not only a
+runtime one.
+
 ## The tag
 
 A value is never concatenated into the SQL text. Every interpolated value becomes a `$n`
