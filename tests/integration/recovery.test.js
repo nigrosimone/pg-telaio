@@ -75,16 +75,17 @@ test("recovery", async (t) => {
             let texts = 0;
             const wrong = [];
             const failures = [];
+            let failed = 0;
 
             // each worker asks a question only it can be answered with: `who` comes back from
             // its own parameter, so a reply delivered to the wrong caller shows up as a mismatch
             // instead of passing for a right answer
+            // bounded by the clock, not by a count: a fast machine would finish a count before
+            // the alter even lands, and a retry that never recovers must fail an assertion
+            // rather than spin until the heap gives out
+            const deadline = Date.now() + 10000;
             const worker = async (who) => {
-                let sent = 0;
-                // bounded: a retry that never recovers must fail an assertion, not spin until
-                // the heap gives out
-                while (!stop && sent < 400) {
-                    sent++;
+                while (!stop && Date.now() < deadline) {
                     try {
                         const { rows } =
                             await sql`select ${who}::int as who, v from telaio_test_inflight where id = ${1}`;
@@ -102,7 +103,13 @@ test("recovery", async (t) => {
                             wrong.push(who + " got v " + v);
                         }
                     } catch (err) {
-                        failures.push(err);
+                        // the count is what the assertions read; a handful of samples is enough
+                        // to say what went wrong, and keeping them all is how this ran out of
+                        // memory when the retry was broken
+                        failed++;
+                        if (failures.length < 5) {
+                            failures.push(err);
+                        }
                     }
                 }
             };
@@ -141,12 +148,12 @@ test("recovery", async (t) => {
                     []
                 );
                 assert.ok(ints > 0, "no query ran before the alter");
-                assert.ok(texts > 0, "every query after the alter failed (" + failures.length + " failures)");
+                assert.ok(texts > 0, "every query after the alter failed (" + failed + " failures)");
                 // a retry that gave up would leave a stream of handled codes behind it: the point
                 // of the retry is that the caller does not see them
                 assert.ok(
-                    failures.length < ints + texts,
-                    "more queries failed (" + failures.length + ") than came back (" + (ints + texts) + ")"
+                    failed < ints + texts,
+                    "more queries failed (" + failed + ") than came back (" + (ints + texts) + ")"
                 );
 
                 // and the connections are all usable afterwards, with the new type
