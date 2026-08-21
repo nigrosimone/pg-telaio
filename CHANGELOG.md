@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1](https://github.com/nigrosimone/pg-telaio/compare/v0.1.0...v0.1.1) (2026-08-21)
+
+### Bug Fixes
+
+* the pipelined connections open on demand instead of all at createSql ([ed4517a](https://github.com/nigrosimone/pg-telaio/commit/ed4517aded315fa52e3dd351bce2abd5db9d056b))
+
 ## 0.1.0 (2026-08-21)
 
 ### Features

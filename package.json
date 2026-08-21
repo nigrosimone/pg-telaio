@@ -1,6 +1,6 @@
 {
     "name": "pg-telaio",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "A sql tagged template for node-postgres, with pipelined queries underneath, without replacing its Pool",
     "main": "src/index.js",
     "types": "src/types.d.ts",
