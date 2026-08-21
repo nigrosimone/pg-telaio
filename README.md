@@ -1,8 +1,9 @@
 # pg-telaio
 
-A tagged template for [node-postgres](https://github.com/brianc/node-postgres). Values become
-parameters, statements get prepared and named for you when you ask, and underneath the queries are
-pipelined for as long as pg's own pool cannot do that.
+Telaio - the loom, in Italian - is a tagged template for
+[node-postgres](https://github.com/brianc/node-postgres): it weaves template strings and values
+into one query. Values become parameters, statements get prepared and named for you, and
+underneath the queries are pipelined for as long as pg's own pool cannot do that.
 
 It takes the pool the application already has, and gives it back untouched.
 
