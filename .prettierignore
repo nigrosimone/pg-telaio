@@ -8,3 +8,6 @@ bench
 examples
 
 LICENSE
+
+# written by conventional-changelog on the release runner, where no hook reformats it
+CHANGELOG.md
