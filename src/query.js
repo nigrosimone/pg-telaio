@@ -461,17 +461,18 @@ class Query {
     }
 }
 
-module.exports = {
-    Query,
-    Identifier,
-    Raw,
-    ParamList,
-    InsertValues,
-    SetValues,
-    Dynamic,
-    WrappedParam,
-    quoteIdent,
-    nameFor,
-    rotateName,
-    compile
-};
+// One assignment per export rather than one object: a class exported this way is a type as well
+// as a value, which is what the JSDoc annotations in index.js ask of it. Exported as one object
+// literal, tsc 7 reads the members as values only and every annotation using them fails.
+module.exports.Query = Query;
+module.exports.Identifier = Identifier;
+module.exports.Raw = Raw;
+module.exports.ParamList = ParamList;
+module.exports.InsertValues = InsertValues;
+module.exports.SetValues = SetValues;
+module.exports.Dynamic = Dynamic;
+module.exports.WrappedParam = WrappedParam;
+module.exports.quoteIdent = quoteIdent;
+module.exports.nameFor = nameFor;
+module.exports.rotateName = rotateName;
+module.exports.compile = compile;

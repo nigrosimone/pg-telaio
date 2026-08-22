@@ -43,6 +43,9 @@ function isConnectionError(err) {
 function createDispatcher(Client, config, { connections, maxPipeline, stallMillis = 0, overflow = null }) {
     // a null slot is capacity that was never asked for: nothing is opened until a query picks
     // the slot, so a tag over an idle pool costs zero connections, the way the pool itself does
+    // annotated because the slots hold either a slot or nothing, and an array filled with null
+    // is otherwise read as an array of null
+    /** @type {any[]} */
     const slots = new Array(connections).fill(null);
     const waiters = [];
     let closed = false;
@@ -112,6 +115,7 @@ function createDispatcher(Client, config, { connections, maxPipeline, stallMilli
      * @returns {{ slot: any|null, stalled: boolean }}
      */
     const pick = () => {
+        /** @type {any} */
         let best = null;
         let stalled = false;
         let unused = -1;

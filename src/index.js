@@ -262,6 +262,7 @@ function createSql(pool, options = {}) {
     }
 
     const connections = pipeline === "auto" ? (poolPipelines(pool) ? 0 : 3) : pipeline === false ? 0 : pipeline;
+    /** @type {{ query: (config: object) => Promise<any>, close: () => Promise<any> }|null} */
     let dispatcher = null;
     if (connections > 0) {
         const Client = pool.Client || require("pg").Client;
