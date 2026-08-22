@@ -1,0 +1,19 @@
+{
+    // Compiles tests/types/api.ts, the fixture that reads the package the way a TypeScript caller
+    // does. `paths` points "pg-telaio" at the shipped d.ts, so the fixture exercises the published
+    // contract rather than the source, and strict is on because that is how callers compile.
+    "compilerOptions": {
+        "module": "node16",
+        "moduleResolution": "node16",
+        "target": "ES2022",
+        "lib": ["ES2022", "ESNext.Disposable"],
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": true,
+        "types": ["node"],
+        "paths": {
+            "pg-telaio": ["./src/types.d.ts"]
+        }
+    },
+    "include": ["tests/types/**/*.ts"]
+}
