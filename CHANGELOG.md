@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0](https://github.com/nigrosimone/pg-telaio/compare/v0.1.2...v1.0.0) (2026-08-22)
+
+### Bug Fixes
+
+* dependabot ignore takes no dependency-type ([e4b7687](https://github.com/nigrosimone/pg-telaio/commit/e4b7687a145afda952e71040c7ccadbc7f4d9c1a))
+* keep the source type-checkable on both tsc 6 and tsc 7 ([5d1ff98](https://github.com/nigrosimone/pg-telaio/commit/5d1ff9867d687e7b325e89d8341e45e2428727e7))
+* read the declarations without the compiler api, which tsc 7 no longer ships ([34d70c6](https://github.com/nigrosimone/pg-telaio/commit/34d70c65eee357655336c0d09b66efe8c3c0bafc))
+
 ## [0.1.2](https://github.com/nigrosimone/pg-telaio/compare/v0.1.1...v0.1.2) (2026-08-21)
 
 ### Bug Fixes
