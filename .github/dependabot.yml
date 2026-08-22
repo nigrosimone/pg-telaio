@@ -18,15 +18,14 @@ updates:
           prefix: "chore(deps)"
           prefix-development: "chore(deps-dev)"
       groups:
-          # everything else arrives as one pull request a month rather than fifteen. pg is left
-          # out of the group on purpose, below.
+          # everything else arrives as one pull request a month rather than fifteen. pg comes on
+          # its own: it is the driver everything here sits on, and its pull request runs the
+          # integration suite against the new version, which is the point of letting it through.
           development:
               dependency-type: development
               exclude-patterns:
                   - pg
                   - "@types/pg"
-      ignore:
-          # the peer range is a compatibility statement, not a version to track: it says which pg
-          # this works with, and only a test run against a new pg can move it
-          - dependency-name: pg
-            dependency-type: production
+      # The peer range, pg >=8.23.0, is not maintained here: it is a compatibility statement, and
+      # only a test run against a new pg can widen or raise it. Dependabot moves the devDependency,
+      # which is what the suites run against.
