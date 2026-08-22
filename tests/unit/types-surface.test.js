@@ -10,39 +10,109 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const fs = require("node:fs");
 const path = require("node:path");
-const ts = require("typescript");
 
 const { createSql, sql } = require("../../src/index.js");
 
 const DTS = path.join(__dirname, "..", "..", "src", "types.d.ts");
+const INDEX = path.join(__dirname, "..", "..", "src", "index.js");
 
 /**
- * The members an interface declares in the d.ts, by name. Only the interface's own members: what
- * it inherits is checked through the interface it extends.
+ * The d.ts with its comments removed, so a brace inside a comment cannot be read as syntax.
+ *
+ * @returns {string}
+ */
+function declarations() {
+    return fs
+        .readFileSync(DTS, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+}
+
+/**
+ * Where an interface starts, or -1. Found by text rather than by a pattern so that a longer name
+ * cannot answer for a shorter one: `interface Query` must not find `interface QueryResult`.
+ *
+ * @param {string} source
+ * @param {string} name
+ * @returns {number}
+ */
+function interfaceAt(source, name) {
+    const marker = "interface " + name;
+    for (let i = source.indexOf(marker); i !== -1; i = source.indexOf(marker, i + 1)) {
+        const after = source.charAt(i + marker.length);
+        if (!/[A-Za-z0-9_]/.test(after)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * The members an interface declares, by name. Read here rather than through the TypeScript
+ * compiler API: tsc 7 is a Go program whose npm package no longer carries that API, and this test
+ * has to keep working whichever compiler is installed. It reads one file, ours, written in a
+ * style we control, and it says so loudly when it parses nothing.
  *
  * @param {string} name
  * @returns {string[]}
  */
 function declaredMembers(name) {
-    const source = ts.createSourceFile(DTS, require("node:fs").readFileSync(DTS, "utf8"), ts.ScriptTarget.ES2022, true);
-    /** @type {string[]} */
-    const found = [];
-    /** @param {any} node */
-    const walk = (node) => {
-        if (ts.isInterfaceDeclaration(node) && node.name.text === name) {
-            for (const member of node.members) {
-                // the call signatures of the tag itself have no name, and neither do index
-                // signatures; both are the fixture's business, not this test's
-                if (member.name && ts.isIdentifier(member.name)) {
-                    found.push(member.name.text);
-                }
+    const source = declarations();
+    const start = interfaceAt(source, name);
+    assert.ok(start !== -1, "no interface named " + name + " in types.d.ts");
+    const open = source.indexOf("{", start);
+    assert.ok(open !== -1, "interface " + name + " has no body");
+
+    let depth = 0;
+    let end = open;
+    for (let i = open; i < source.length; i++) {
+        if (source[i] === "{") {
+            depth++;
+        } else if (source[i] === "}") {
+            depth--;
+            if (depth === 0) {
+                end = i;
+                break;
             }
         }
-        ts.forEachChild(node, walk);
-    };
-    walk(source);
-    assert.ok(found.length > 0, "no interface named " + name + " in types.d.ts");
+    }
+    const body = source.slice(open + 1, end);
+
+    // split on the semicolons that end a member, which are the ones outside any nested braces,
+    // brackets or parentheses. Angle brackets are left out of the count on purpose: the > of an
+    // arrow has no < to match it, and a member's semicolon never sits inside a generic anyway.
+    /** @type {string[]} */
+    const chunks = [];
+    let level = 0;
+    let current = "";
+    for (const ch of body) {
+        if ("{[(".includes(ch)) {
+            level++;
+        } else if ("}])".includes(ch)) {
+            level--;
+        }
+        if (ch === ";" && level === 0) {
+            chunks.push(current);
+            current = "";
+            continue;
+        }
+        current += ch;
+    }
+    chunks.push(current);
+
+    /** @type {string[]} */
+    const found = [];
+    for (const chunk of chunks) {
+        // a named member: `foo(...)`, `foo?: X`, `readonly foo: X`. A call signature starts with
+        // ( or <, an index signature with [, and neither is this test's business.
+        const match = chunk.trim().match(/^(?:readonly\s+)?([A-Za-z_]\w*)\s*[?(<:]/);
+        if (match) {
+            found.push(match[1]);
+        }
+    }
+    assert.ok(found.length > 0, "parsed no members out of interface " + name);
     return found;
 }
 
@@ -101,7 +171,7 @@ test("a built query carries what the Query and BuiltQuery types promise", () => 
 });
 
 test("every option createSql reads is declared, and every declared option is read", () => {
-    const source = require("node:fs").readFileSync(path.join(__dirname, "..", "..", "src", "index.js"), "utf8");
+    const source = fs.readFileSync(INDEX, "utf8");
     // the one destructuring of the options argument in createSql
     const match = source.match(/const \{([^}]+)\} = options;/);
     assert.ok(match, "could not find the options destructuring in src/index.js");
@@ -124,7 +194,7 @@ test("every option createSql reads is declared, and every declared option is rea
 });
 
 test("the sibling overrides the types offer are the ones options() accepts", () => {
-    const source = require("node:fs").readFileSync(path.join(__dirname, "..", "..", "src", "index.js"), "utf8");
+    const source = fs.readFileSync(INDEX, "utf8");
     for (const key of declaredMembers("OptionOverrides")) {
         assert.ok(
             source.includes('"' + key + '" in overrides'),
