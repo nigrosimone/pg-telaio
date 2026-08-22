@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: monthly
+      commit-message:
+          prefix: "chore(deps)"
+
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: monthly
+      commit-message:
+          # the changelog and the version bump are generated from the commit subjects, so the
+          # prefixes have to stay conventional
+          prefix: "chore(deps)"
+          prefix-development: "chore(deps-dev)"
+      groups:
+          # everything else arrives as one pull request a month rather than fifteen. pg is left
+          # out of the group on purpose, below.
+          development:
+              dependency-type: development
+              exclude-patterns:
+                  - pg
+                  - "@types/pg"
+      ignore:
+          # the peer range is a compatibility statement, not a version to track: it says which pg
+          # this works with, and only a test run against a new pg can move it
+          - dependency-name: pg
+            dependency-type: production
