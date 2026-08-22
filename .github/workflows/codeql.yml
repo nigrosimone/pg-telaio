@@ -1,0 +1,54 @@
+# Static analysis for the shipped source, which is the half of the review a test suite cannot do:
+# the suites say the queries answer correctly, not that a value can never reach the SQL text or
+# that an identifier cannot break out of its quotes. Those are exactly the shapes this handles.
+#
+# security-extended over the default suite: the default one is tuned to keep noise low on
+# application code, and this is a library that builds SQL from caller input.
+name: CodeQL
+
+on:
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
+    schedule:
+        # a weekly run, because the queries improve even when the code does not
+        - cron: "37 4 * * 1"
+
+# nothing here writes to the repository; codeql asks for what it needs on its own job
+permissions:
+    contents: read
+
+jobs:
+    analyze:
+        name: Analyze JavaScript
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        permissions:
+            security-events: write
+            actions: read
+            contents: read
+
+        steps:
+            - name: Checkout Source Tree
+              uses: actions/checkout@v7
+
+            - name: Initialise CodeQL
+              uses: github/codeql-action/init@v4
+              with:
+                  languages: javascript-typescript
+                  queries: security-extended
+                  # only what is published: the tests and the bench build deliberately odd SQL,
+                  # and a finding there would be about the fixtures rather than the package
+                  config: |
+                      paths:
+                        - src
+                      paths-ignore:
+                        - bench
+                        - tests
+                        - examples
+
+            - name: Analyse
+              uses: github/codeql-action/analyze@v4
+              with:
+                  category: "/language:javascript-typescript"

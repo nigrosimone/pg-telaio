@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/pg-telaio)](https://www.npmjs.com/package/pg-telaio)
 [![Tests](https://github.com/nigrosimone/pg-telaio/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/nigrosimone/pg-telaio/actions/workflows/test.yml)
 [![Node.js 22 | 24 | 26](https://img.shields.io/badge/Node.js-22%20%7C%2024%20%7C%2026-green)](https://nodejs.org)
+[![CodeQL](https://github.com/nigrosimone/pg-telaio/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nigrosimone/pg-telaio/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 Telaio - the loom, in Italian - is a tagged template for
