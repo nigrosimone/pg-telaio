@@ -25,8 +25,7 @@ The package is CommonJS and works from ESM unchanged: `import { createSql } from
 
 ## TypeScript
 
-The types ship with the package, hand written in `src/types.d.ts`, so there is nothing to install
-next to it. A query takes the row type it returns:
+The types ship with the package. A query takes the row type it returns:
 
 ```ts
 interface Item {
