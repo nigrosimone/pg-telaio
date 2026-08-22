@@ -278,3 +278,13 @@ docker exec -i telaio psql -U bench -d benchmark < bench/seed.sql
 node bench/bench.js       # pool vs the tag
 node bench/kill.js        # connections killed under load
 ```
+
+## Thanks
+
+To [postgres.js](https://github.com/porsager/postgres), which is where the idea of writing queries
+as a tagged template comes from: the shape of the helpers here follows what it taught everyone to
+expect, and this package would not exist without it.
+
+And to [node-postgres](https://github.com/brianc/node-postgres) for all the rest. Everything under
+the tag is pg: its Client, its Pool, its protocol. This package only puts a different surface on
+top and gets out of the way.
