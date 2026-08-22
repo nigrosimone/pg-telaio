@@ -19,6 +19,21 @@
         "url": "https://github.com/nigrosimone/pg-telaio/issues"
     },
     "homepage": "https://github.com/nigrosimone/pg-telaio#readme",
+    "keywords": [
+        "postgres",
+        "postgresql",
+        "pg",
+        "node-postgres",
+        "sql",
+        "tagged template",
+        "template literal",
+        "query builder",
+        "prepared statements",
+        "pipelining",
+        "pipeline",
+        "database",
+        "performance"
+    ],
     "scripts": {
         "test": "node --test --test-timeout=60000 \"tests/unit/*.test.js\"",
         "test:integration": "node --test --test-timeout=120000 --test-concurrency=1 \"tests/integration/*.test.js\"",
